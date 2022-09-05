@@ -2,7 +2,7 @@
 extern crate lazy_static;
 
 use std::{ffi::{CString, CStr}, os::raw::c_char, slice, ptr::{null_mut}, fmt::{format, Debug}};
-use identity_iota::{account::{Account, IdentitySetup, MethodContent}, iota_core::IotaDID, prelude::{KeyPair, KeyType}, core::ToJson, client::{Resolver}, did::MethodRelationship, crypto::{Ed25519, PublicKey}};
+use identity_iota::{account::{Account, IdentitySetup, MethodContent}, iota_core::IotaDID, prelude::{KeyPair, KeyType, IotaDocument}, core::{ToJson, FromJson}, client::{Resolver, CredentialValidator, FailFast, CredentialValidationOptions}, did::MethodRelationship, crypto::{Ed25519, PublicKey}, credential::Credential};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
@@ -12,7 +12,7 @@ lazy_static! {
 
 #[no_mangle]
 pub extern fn create_did(priv_key: *const u8, key_len: usize) -> *mut c_char {
-    let account: Result<Account, _> =  RUNTIME.block_on(
+    let account =  RUNTIME.block_on(
         async move { 
             create_did_async(priv_key, key_len).await
         }
@@ -69,15 +69,51 @@ pub extern fn resolve_did(did: *const c_char) -> *mut c_char {
     let did_str = unsafe { CStr::from_ptr(did).to_str() }.unwrap();
     let doc = RUNTIME.block_on(
         async move {
-            let resolver: Resolver = Resolver::new().await?;
-            let did: IotaDID = IotaDID::parse(did_str)?;
-            resolver.resolve(&did).await
+            resolve_did_async(String::from(did_str)).await
         }
     );
     if doc.is_ok() {
-        return CString::new(doc.unwrap().document.core_document().to_json().unwrap()).unwrap().into_raw();
+        return CString::new(doc.unwrap().core_document().to_json().unwrap()).unwrap().into_raw();
     } else {
+        println!("{}", doc.unwrap_err().to_string());
         return null_mut();
+    }
+}
+
+async fn resolve_did_async(did_str: String) -> Result<IotaDocument, identity_iota::account::Error> {
+    let resolver: Resolver = Resolver::new().await?;
+    let did: IotaDID = IotaDID::parse(did_str)?;
+    let doc = resolver.resolve(&did).await?;
+    Ok(doc.document)
+}
+
+async fn validate_credential_async(credential_json: String) -> Result<bool, identity_iota::account::Error> {    
+    let credential: Credential = Credential::from_json(credential_json.as_str())?;
+    
+    let issuer_did = credential.issuer.url().to_string();
+    println!("Issuer DID: {}", issuer_did);
+    let issuer_doc = resolve_did_async(issuer_did).await?;
+    println!("{}", issuer_doc.to_json_pretty().unwrap());
+
+    let result = CredentialValidator::validate(&credential, &issuer_doc, &CredentialValidationOptions::default(), FailFast::FirstError);
+    if result.is_ok() {
+        println!("Validation successful!");
+        Ok(true)
+    } else {
+        let err_msg = result.unwrap_err().to_string();
+        println!("Validation failed: {}", &err_msg);
+        Err(identity_iota::credential::Error::InvalidStatus(err_msg).into())
+    }
+}
+
+pub fn validate_credential(credential_json: String) -> bool {
+    let valid = RUNTIME.block_on(async move {
+        validate_credential_async(credential_json).await
+    });
+    if valid.is_ok() {
+        valid.unwrap()
+    } else {
+        false
     }
 }
 
@@ -91,9 +127,9 @@ pub extern fn free_str(str: *mut i8) {
 mod tests {
     use std::{ffi::{CStr, CString}, ptr::{null, null_mut}, slice};
 
-    use identity_iota::prelude::{KeyPair, KeyType};
+    use identity_iota::{prelude::{KeyPair, KeyType}, client::Resolver};
 
-    use crate::{create_did, resolve_did, free_str};
+    use crate::{create_did, resolve_did, free_str, validate_credential};
 
     #[test]
     fn test_create_did() {
@@ -130,5 +166,54 @@ mod tests {
             free_str(did_doc_raw);
         }
         free_str(did_raw)
+    }
+
+    #[test]
+    fn test_validate_credential() {
+        let vc = r#"{
+            "@context" : [ "https://www.w3.org/2018/credentials/v1" ],
+            "credentialSchema" : {
+              "id" : "https://api.preprod.ebsi.eu/trusted-schemas-registry/v1/schemas/0xb77f8516a965631b4f197ad54c65a9e2f9936ebfb76bae4906d33744dbcc60ba",
+              "type" : "FullJsonSchemaValidator2021"
+            },
+            "credentialSubject" : {
+              "currentAddress" : [ "1 Boulevard de la Liberté, 59800 Lille" ],
+              "dateOfBirth" : "1993-04-08",
+              "familyName" : "DOE",
+              "firstName" : "Jane",
+              "gender" : "FEMALE",
+              "id" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj",
+              "nameAndFamilyNameAtBirth" : "Jane DOE",
+              "personalIdentifier" : "0904008084H",
+              "placeOfBirth" : "LILLE, FRANCE"
+            },
+            "evidence" : [ {
+              "documentPresence" : [ "Physical" ],
+              "evidenceDocument" : [ "Passport" ],
+              "subjectPresence" : "Physical",
+              "type" : [ "DocumentVerification" ],
+              "verifier" : "did:ebsi:2A9BZ9SUe6BatacSpvs1V5CdjHvLpQ7bEsi2Jb6LdHKnQxaN"
+            } ],
+            "id" : "urn:uuid:d4692ec9-25d6-4485-8bec-9625924c5f2d",
+            "issued" : "2022-09-05T15:22:28.887224589Z",
+            "issuer" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj",
+            "validFrom" : "2022-09-05T15:22:28.887229509Z",
+            "issuanceDate" : "2022-09-05T15:22:28.887229509Z",
+            "type" : [ "VerifiableCredential", "VerifiableAttestation", "VerifiableId" ],
+            "proof" : {
+              "type" : "JcsEd25519Signature2020",
+              "creator" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj",
+              "created" : "2022-09-05T15:22:29Z",
+              "domain" : "https://api.preprod.ebsi.eu",
+              "nonce" : "3db6968f-8bc0-4ba0-8725-f2de777a2d4b",
+              "proofPurpose" : "assertionMethod",
+              "verificationMethod" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj#6c1717c99fc64b3b92cbb4049f9ec71f",
+              "signatureValue" : "3mX7fMp3CvdtakarqSy5K9fPz9aqo273uWmg6fEMzuo4i1jYUxXUgJ6mJkpSVJzFmhSPEjmrzz95ByfGuvQrVFqa"
+            }
+          }
+          "#;
+
+          let valid = validate_credential(String::from(vc));
+          assert_eq!(true, valid);
     }
 }
