@@ -1,9 +1,10 @@
 #[macro_use]
 extern crate lazy_static;
 
-use std::{ffi::{CString, CStr}, os::raw::c_char, slice, ptr::{null_mut}, fmt::format};
+use std::{ffi::{CString, CStr}, os::raw::c_char, slice, ptr::{null_mut}, fmt::{format, Debug}};
 use identity_iota::{account::{Account, IdentitySetup, MethodContent}, iota_core::IotaDID, prelude::{KeyPair, KeyType}, core::ToJson, client::{Resolver}, did::MethodRelationship, crypto::{Ed25519, PublicKey}};
 use tokio::runtime::Runtime;
+use uuid::Uuid;
 
 lazy_static! {
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
@@ -43,7 +44,7 @@ async fn create_did_async(priv_key: *const u8, key_len: usize) -> Result<Account
     let signing_method = account.document().default_signing_method().unwrap();
     println!("Default signing method: {}", signing_method.to_json_pretty().unwrap());
     let fragment0 = signing_method.id().fragment().unwrap().to_string();
-    let fragment1 = format!("{}.1", fragment0);
+    let fragment1 = Uuid::new_v4().as_simple().to_string();
     let pub_key = PublicKey::from(signing_method.data().try_decode().unwrap());
     println!("Creating generic verification method...");
     account.update_identity().create_method().content(MethodContent::PublicEd25519(pub_key)).fragment(&fragment1).apply().await?;
