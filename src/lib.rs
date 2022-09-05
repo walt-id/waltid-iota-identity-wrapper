@@ -74,7 +74,7 @@ pub extern fn resolve_did(did: *const c_char) -> *mut c_char {
         }
     );
     if doc.is_ok() {
-        return CString::new(doc.unwrap().document.core_document().to_jcs().unwrap()).unwrap().into_raw();
+        return CString::new(doc.unwrap().document.core_document().to_json().unwrap()).unwrap().into_raw();
     } else {
         return null_mut();
     }
