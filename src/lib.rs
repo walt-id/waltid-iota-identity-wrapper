@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_resolve_did() {
-        let did_raw = CString::new("did:iota:13FUaeSdUBQ3gCYba59yhUHBZZCVkJfiDHBhigztNVLc").unwrap().into_raw();
+        let did_raw = CString::new("did:iota:5MB5Tmsim8eriMB8wim6K6tARdNuLZuUVjg9f9jUy6QF").unwrap().into_raw();
         let did_doc_raw = resolve_did(did_raw);
         assert!(!did_doc_raw.is_null());
         if !did_doc_raw.is_null() {
