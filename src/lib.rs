@@ -37,16 +37,16 @@ async fn create_did_async(priv_key: *const u8, key_len: usize) -> Result<Account
         let pk: Box<[u8]> = kp.private().as_ref().into();
         identity_setup = identity_setup.private_key(pk.into());
     }
-    println!("Creating new account...");
+    println!("Creating did:iota...");
     let mut account = Account::builder().create_identity(identity_setup).await?;
-    println!("Created account: {}", account.did().to_string());
+    println!("Created did: {}", account.did().to_string());
 
     let signing_method = account.document().default_signing_method().unwrap();
     println!("Default signing method: {}", signing_method.to_json_pretty().unwrap());
     let fragment0 = signing_method.id().fragment().unwrap().to_string();
     let fragment1 = Uuid::new_v4().as_simple().to_string();
     let pub_key = PublicKey::from(signing_method.data().try_decode().unwrap());
-    println!("Creating generic verification method...");
+    println!("Creating generic verification method ({}#{})...", signing_method.id().did().to_string(), fragment1);
     account.update_identity().create_method().content(MethodContent::PublicEd25519(pub_key)).fragment(&fragment1).apply().await?;
     println!("Updating verification relationships...");
     account.update_identity()
