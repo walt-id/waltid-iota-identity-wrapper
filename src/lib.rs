@@ -1,10 +1,15 @@
 #[macro_use]
 extern crate lazy_static;
+mod dids;
+mod store;
 
 use std::{ffi::{CString, CStr}, os::raw::c_char, slice, ptr::{null_mut}, fmt::{format, Debug}};
-use identity_iota::{account::{Account, IdentitySetup, MethodContent}, iota_core::IotaDID, prelude::{KeyPair, KeyType, IotaDocument}, core::{ToJson, FromJson}, client::{Resolver, CredentialValidator, FailFast, CredentialValidationOptions}, did::MethodRelationship, crypto::{Ed25519, PublicKey}, credential::Credential};
+use std::ptr::null;
+use identity_core::convert::ToJson;
+use identity_core::crypto::{KeyPair, KeyType};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
+use crate::dids::{create_account_async, resolve_did_async};
 
 lazy_static! {
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
@@ -12,56 +17,35 @@ lazy_static! {
 
 #[no_mangle]
 pub extern fn create_did(priv_key: *const u8, key_len: usize) -> *mut c_char {
-    let account =  RUNTIME.block_on(
-        async move { 
-            create_did_async(priv_key, key_len).await
+    let document =  RUNTIME.block_on(
+        async move {
+            create_account_async(priv_key, key_len).await
         }
     );
-    
-    if account.is_ok() {
-        let did_doc = account.unwrap().document().core_document().to_json_pretty().unwrap();
+
+    if document.is_ok() {
+        let did_doc = document.unwrap().core_document().to_json_pretty().unwrap();
         return CString::new(did_doc).unwrap().into_raw()
     } else {
-        println!("{}", account.unwrap_err().to_string());
+        println!("{}", document.unwrap_err().to_string());
         return null_mut()
     }
 }
 
-async fn create_did_async(priv_key: *const u8, key_len: usize) -> Result<Account, identity_iota::account::Error> {
-    let mut identity_setup = IdentitySetup::default();
-    if !priv_key.is_null() && key_len > 0 {
-        let kp = unsafe { KeyPair::try_from_private_key_bytes(
-            KeyType::Ed25519, 
-            slice::from_raw_parts(priv_key, key_len)) 
-        }.unwrap();
-        let pk: Box<[u8]> = kp.private().as_ref().into();
-        identity_setup = identity_setup.private_key(pk.into());
+#[no_mangle]
+pub extern fn create_did_offline(priv_key: *const u8, key_len: usize) -> *mut c_char {
+    let kp = unsafe { KeyPair::try_from_private_key_bytes(
+        KeyType::Ed25519,
+        slice::from_raw_parts(priv_key, key_len))
+    }.unwrap();
+    let document= dids::create_did(&kp);
+    if document.is_ok() {
+        let did_doc = document.unwrap().core_document().to_json_pretty().unwrap();
+        return CString::new(did_doc).unwrap().into_raw()
+    } else {
+        println!("{}", document.unwrap_err().to_string());
+        return null_mut()
     }
-    println!("Creating did:iota...");
-    let mut account = Account::builder().create_identity(identity_setup).await?;
-    println!("Created did: {}", account.did().to_string());
-
-    let signing_method = account.document().default_signing_method().unwrap();
-    println!("Default signing method: {}", signing_method.to_json_pretty().unwrap());
-    let fragment0 = signing_method.id().fragment().unwrap().to_string();
-    let fragment1 = Uuid::new_v4().as_simple().to_string();
-    let pub_key = PublicKey::from(signing_method.data().try_decode().unwrap());
-    println!("Creating generic verification method ({}#{})...", signing_method.id().did().to_string(), fragment1);
-    account.update_identity().create_method().content(MethodContent::PublicEd25519(pub_key)).fragment(&fragment1).apply().await?;
-    println!("Updating verification relationships...");
-    account.update_identity()
-    .attach_method_relationship().fragment(&fragment1).relationships(
-        [
-            MethodRelationship::AssertionMethod,
-            MethodRelationship::Authentication,
-            MethodRelationship::CapabilityDelegation,
-            MethodRelationship::CapabilityInvocation,
-            MethodRelationship::KeyAgreement
-        ]
-    ).apply().await?;
-    println!("Removing default signing method...");
-    account.update_identity().delete_method().fragment(&fragment0).apply().await?;
-    Ok(account)
 }
 
 #[no_mangle]
@@ -80,16 +64,12 @@ pub extern fn resolve_did(did: *const c_char) -> *mut c_char {
     }
 }
 
-async fn resolve_did_async(did_str: String) -> Result<IotaDocument, identity_iota::account::Error> {
-    let resolver: Resolver = Resolver::new().await?;
-    let did: IotaDID = IotaDID::parse(did_str)?;
-    let doc = resolver.resolve(&did).await?;
-    Ok(doc.document)
-}
 
-async fn validate_credential_async(credential_json: String) -> Result<bool, identity_iota::account::Error> {    
+
+async fn validate_credential_async(credential_json: String) -> Result<bool, identity_iota::account::Error> {
     let credential: Credential = Credential::from_json(credential_json.as_str())?;
-    
+    println!("Credential: {}", credential.to_json_pretty()?);
+
     let issuer_did = credential.issuer.url().to_string();
     println!("Issuer DID: {}", issuer_did);
     let issuer_doc = resolve_did_async(issuer_did).await?;
@@ -117,6 +97,43 @@ pub fn validate_credential(credential_json: String) -> bool {
     }
 }
 
+// async fn issue_credential_async() -> Result<String, identity_iota::account::Error> {
+//     let issuer = create_did_async(null(), 0).await?;
+//
+//     let subject: Subject = Subject::from_json_value(json!({
+//         "id": issuer.id(),
+//         "currentAddress" : [ "1 Boulevard de la Liberté, 59800 Lille" ],
+//         "dateOfBirth" : "1993-04-08",
+//         "familyName" : "DOE",
+//         "firstName" : "Jane",
+//         "gender" : "FEMALE",
+//         "nameAndFamilyNameAtBirth" : "Jane DOE",
+//         "personalIdentifier" : "0904008084H",
+//         "placeOfBirth" : "LILLE, FRANCE",
+//       }))?;
+//
+//     let mut credential: Credential = CredentialBuilder::default()
+//         .id(Url::parse("https://example.edu/credentials/3732")?)
+//         .issuer(Url::parse(issuer.id().as_str())?)
+//         .type_("VerifiableId")
+//         .subject(subject)
+//         .build()?;
+//
+//     issuer
+//         .sign(issuer.default_signing_method()?.id().fragment().unwrap(), &mut credential, ProofOptions::default())
+//         .await?;
+//
+//     println!("Credential JSON > {:#}", credential);
+//
+//     Ok(credential.to_json().unwrap())
+// }
+
+// pub fn issue_credential() -> Result<String, identity_iota::account::Error> {
+//     RUNTIME.block_on(async move {
+//         issue_credential_async().await
+//     })
+// }
+
 #[no_mangle]
 pub extern fn free_str(str: *mut i8) {
     // retake pointer to free memory
@@ -126,10 +143,9 @@ pub extern fn free_str(str: *mut i8) {
 #[cfg(test)]
 mod tests {
     use std::{ffi::{CStr, CString}, ptr::{null, null_mut}, slice};
+    use identity_core::crypto::{KeyPair, KeyType};
 
-    use identity_iota::{prelude::{KeyPair, KeyType}, client::Resolver};
-
-    use crate::{create_did, resolve_did, free_str, validate_credential};
+    use crate::{create_did, resolve_did, free_str, validate_credential, create_did_offline, IotaDocument};
 
     #[test]
     fn test_create_did() {
@@ -141,6 +157,37 @@ mod tests {
         }.to_str().unwrap();
         println!("{did_doc}");
         free_str(did_doc_raw);
+    }
+
+    #[test]
+    fn test_create_did_offline() {
+        let kp = KeyPair::new(KeyType::Ed25519).unwrap();
+        let prv_bytes: &[u8] = kp.private().as_ref();
+        let did_doc_raw = create_did_offline(prv_bytes.as_ptr(), prv_bytes.len());
+        let did_doc = unsafe {
+            CStr::from_ptr(did_doc_raw)
+        }.to_str().unwrap();
+        println!("{did_doc}");
+        free_str(did_doc_raw);
+    }
+
+    #[test]
+    fn test_create_did_2_ways() {
+        let kp = KeyPair::new(KeyType::Ed25519).unwrap();
+        let prv_bytes: &[u8] = kp.private().as_ref();
+        let did_doc_raw_1 = create_did_offline(prv_bytes.as_ptr(), prv_bytes.len());
+        let did_doc_raw_2 = create_did(prv_bytes.as_ptr(), prv_bytes.len());
+        let did_doc_1 = unsafe {
+            CStr::from_ptr(did_doc_raw_1)
+        }.to_str().unwrap();
+        let did_doc_2 = unsafe {
+            CStr::from_ptr(did_doc_raw_2)
+        }.to_str().unwrap();
+
+        println!("{did_doc_1}");
+        println!("{did_doc_2}");
+        free_str(did_doc_raw_1);
+        free_str(did_doc_raw_2);
     }
 
     #[test]
@@ -171,49 +218,59 @@ mod tests {
     #[test]
     fn test_validate_credential() {
         let vc = r#"{
-            "@context" : [ "https://www.w3.org/2018/credentials/v1" ],
-            "credentialSchema" : {
-              "id" : "https://api.preprod.ebsi.eu/trusted-schemas-registry/v1/schemas/0xb77f8516a965631b4f197ad54c65a9e2f9936ebfb76bae4906d33744dbcc60ba",
-              "type" : "FullJsonSchemaValidator2021"
-            },
-            "credentialSubject" : {
-              "currentAddress" : [ "1 Boulevard de la Liberté, 59800 Lille" ],
-              "dateOfBirth" : "1993-04-08",
-              "familyName" : "DOE",
-              "firstName" : "Jane",
-              "gender" : "FEMALE",
-              "id" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj",
-              "nameAndFamilyNameAtBirth" : "Jane DOE",
-              "personalIdentifier" : "0904008084H",
-              "placeOfBirth" : "LILLE, FRANCE"
-            },
-            "evidence" : [ {
-              "documentPresence" : [ "Physical" ],
-              "evidenceDocument" : [ "Passport" ],
-              "subjectPresence" : "Physical",
-              "type" : [ "DocumentVerification" ],
-              "verifier" : "did:ebsi:2A9BZ9SUe6BatacSpvs1V5CdjHvLpQ7bEsi2Jb6LdHKnQxaN"
-            } ],
-            "id" : "urn:uuid:d4692ec9-25d6-4485-8bec-9625924c5f2d",
-            "issued" : "2022-09-05T15:22:28.887224589Z",
-            "issuer" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj",
-            "validFrom" : "2022-09-05T15:22:28.887229509Z",
-            "issuanceDate" : "2022-09-05T15:22:28.887229509Z",
-            "type" : [ "VerifiableCredential", "VerifiableAttestation", "VerifiableId" ],
-            "proof" : {
-              "type" : "JcsEd25519Signature2020",
-              "creator" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj",
-              "created" : "2022-09-05T15:22:29Z",
-              "domain" : "https://api.preprod.ebsi.eu",
-              "nonce" : "3db6968f-8bc0-4ba0-8725-f2de777a2d4b",
-              "proofPurpose" : "assertionMethod",
-              "verificationMethod" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj#6c1717c99fc64b3b92cbb4049f9ec71f",
-              "signatureValue" : "3mX7fMp3CvdtakarqSy5K9fPz9aqo273uWmg6fEMzuo4i1jYUxXUgJ6mJkpSVJzFmhSPEjmrzz95ByfGuvQrVFqa"
-            }
-          }
-          "#;
+  "@context" : [ "https://www.w3.org/2018/credentials/v1" ],
+  "credentialSchema" : {
+    "id" : "https://api.preprod.ebsi.eu/trusted-schemas-registry/v1/schemas/0xb77f8516a965631b4f197ad54c65a9e2f9936ebfb76bae4906d33744dbcc60ba",
+    "type" : "FullJsonSchemaValidator2021"
+  },
+  "credentialSubject" : {
+    "currentAddress" : [ "1 Boulevard de la Liberté, 59800 Lille" ],
+    "dateOfBirth" : "1993-04-08",
+    "familyName" : "DOE",
+    "firstName" : "Jane",
+    "gender" : "FEMALE",
+    "id" : "did:iota:HxR45dSUrnt4BLZCUd8YzHCgWjrRBc8qhT3Nfr7T8zik",
+    "nameAndFamilyNameAtBirth" : "Jane DOE",
+    "personalIdentifier" : "0904008084H",
+    "placeOfBirth" : "LILLE, FRANCE"
+  },
+  "evidence" : [ {
+    "documentPresence" : [ "Physical" ],
+    "evidenceDocument" : [ "Passport" ],
+    "subjectPresence" : "Physical",
+    "type" : [ "DocumentVerification" ],
+    "verifier" : "did:ebsi:2A9BZ9SUe6BatacSpvs1V5CdjHvLpQ7bEsi2Jb6LdHKnQxaN"
+  } ],
+  "id" : "urn:uuid:615fdc7b-b0b0-4a65-9630-4264dc9f24d5",
+  "issued" : "2022-09-07T15:22:43Z",
+  "issuer" : "did:iota:HxR45dSUrnt4BLZCUd8YzHCgWjrRBc8qhT3Nfr7T8zik",
+  "validFrom" : "2022-09-07T15:22:43Z",
+  "issuanceDate" : "2022-09-07T15:22:43Z",
+  "type" : [ "VerifiableCredential", "VerifiableAttestation", "VerifiableId" ],
+  "proof" : {
+    "type" : "JcsEd25519Signature2020",
+    "created" : "2022-09-07T15:22:43Z",
+    "domain" : "https://api.preprod.ebsi.eu",
+    "proofPurpose" : "assertionMethod",
+    "verificationMethod" : "did:iota:HxR45dSUrnt4BLZCUd8YzHCgWjrRBc8qhT3Nfr7T8zik#4090494cad68423db10149ae4febb928",
+    "signatureValue" : "3wvVjULVKmAD5RT6jtTEQgkNVisXR5sxjX9bZP2LhBfrcGL3Z15cUuTVNR4FqvHgKZvp8p8dKWfCnqDk342yVvLD"
+  }
+}
+"#;
 
           let valid = validate_credential(String::from(vc));
-          assert_eq!(true, valid);
+
+    }
+
+    // #[test]
+    // fn test_issue_and_validate_credential() {
+    //     let cred = issue_credential();
+    //     let valid = validate_credential(cred.unwrap());
+    //     println!("Valid: {}", valid);
+    // }
+
+    #[test]
+    fn test_publish_did() {
+
     }
 }
