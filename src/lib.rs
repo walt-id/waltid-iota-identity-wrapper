@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_resolve_did() {
-        let did_raw = CString::new("did:iota:5MB5Tmsim8eriMB8wim6K6tARdNuLZuUVjg9f9jUy6QF").unwrap().into_raw();
+        let did_raw = CString::new("did:iota:HYPfLqscBJLRtGJfDatrbFQeC8unAFEuf7qth6SMJJUJ").unwrap().into_raw();
         let did_doc_raw = resolve_did(did_raw);
         assert!(!did_doc_raw.is_null());
         if !did_doc_raw.is_null() {
@@ -182,7 +182,7 @@ mod tests {
               "familyName" : "DOE",
               "firstName" : "Jane",
               "gender" : "FEMALE",
-              "id" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj",
+              "id" : "did:iota:HYPfLqscBJLRtGJfDatrbFQeC8unAFEuf7qth6SMJJUJ",
               "nameAndFamilyNameAtBirth" : "Jane DOE",
               "personalIdentifier" : "0904008084H",
               "placeOfBirth" : "LILLE, FRANCE"
@@ -194,23 +194,21 @@ mod tests {
               "type" : [ "DocumentVerification" ],
               "verifier" : "did:ebsi:2A9BZ9SUe6BatacSpvs1V5CdjHvLpQ7bEsi2Jb6LdHKnQxaN"
             } ],
-            "id" : "urn:uuid:d4692ec9-25d6-4485-8bec-9625924c5f2d",
-            "issued" : "2022-09-05T15:22:28.887224589Z",
-            "issuer" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj",
-            "validFrom" : "2022-09-05T15:22:28.887229509Z",
-            "issuanceDate" : "2022-09-05T15:22:28.887229509Z",
+            "id" : "urn:uuid:8793f5d4-4db1-4c6d-ba00-01a208a49f5a",
+            "issued" : "2022-10-13T13:23:37Z",
+            "issuer" : "did:iota:HYPfLqscBJLRtGJfDatrbFQeC8unAFEuf7qth6SMJJUJ",
+            "validFrom" : "2022-10-13T13:23:37Z",
+            "issuanceDate" : "2022-10-13T13:23:37Z",
             "type" : [ "VerifiableCredential", "VerifiableAttestation", "VerifiableId" ],
             "proof" : {
               "type" : "JcsEd25519Signature2020",
-              "creator" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj",
-              "created" : "2022-09-05T15:22:29Z",
-              "domain" : "https://api.preprod.ebsi.eu",
-              "nonce" : "3db6968f-8bc0-4ba0-8725-f2de777a2d4b",
+              "creator" : "did:iota:HYPfLqscBJLRtGJfDatrbFQeC8unAFEuf7qth6SMJJUJ",
+              "created" : "2022-10-13T13:23:38Z",
               "proofPurpose" : "assertionMethod",
-              "verificationMethod" : "did:iota:3bJXWMg1a2MVyVyhQAn3uWZVr1XUQ2e95sxjuE3JJGFj#6c1717c99fc64b3b92cbb4049f9ec71f",
-              "signatureValue" : "3mX7fMp3CvdtakarqSy5K9fPz9aqo273uWmg6fEMzuo4i1jYUxXUgJ6mJkpSVJzFmhSPEjmrzz95ByfGuvQrVFqa"
+              "verificationMethod" : "did:iota:HYPfLqscBJLRtGJfDatrbFQeC8unAFEuf7qth6SMJJUJ#ff01ea87141146a9b65cdebaa3d14995",
+              "signatureValue" : "yjxL43PPrZBscMihcEciM53RyHjakp7n95djZTts2c4F6mEMPgti9s4J1ymdweh5U5Vqw72zXo1Nno9reVtw1vf"
             }
-          }
+          }          
           "#;
 
           let valid = validate_credential(String::from(vc));
