@@ -38,9 +38,10 @@ async fn create_did_async(priv_key: *const u8, key_len: usize) -> Result<Account
         identity_setup = identity_setup.private_key(pk.into());
     }
     println!("Creating did:iota...");
-    let mut account = Account::builder().create_identity(identity_setup).await?;
-    println!("Created did: {}", account.did().to_string());
+    let mut account = Account::builder().autopublish(false).create_identity(identity_setup).await?;
+    account.publish().await?;
 
+    println!("Created did: {}", account.did().to_string());
     let signing_method = account.document().default_signing_method().unwrap();
     println!("Default signing method: {}", signing_method.to_json_pretty().unwrap());
     let fragment0 = signing_method.id().fragment().unwrap().to_string();
@@ -61,6 +62,8 @@ async fn create_did_async(priv_key: *const u8, key_len: usize) -> Result<Account
     ).apply().await?;
     println!("Removing default signing method...");
     account.update_identity().delete_method().fragment(&fragment0).apply().await?;
+    println!("Publishing DID changes...");
+    account.publish().await?;
     Ok(account)
 }
 
