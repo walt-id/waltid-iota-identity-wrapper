@@ -2,7 +2,7 @@
 extern crate lazy_static;
 
 use std::{ffi::{CString, CStr}, os::raw::c_char, slice, ptr::{null_mut}, fmt::{format, Debug}};
-use identity_iota::{account::{Account, IdentitySetup, MethodContent}, iota_core::IotaDID, prelude::{KeyPair, KeyType, IotaDocument}, core::{ToJson, FromJson}, client::{Resolver, CredentialValidator, FailFast, CredentialValidationOptions}, did::MethodRelationship, crypto::{Ed25519, PublicKey}, credential::Credential};
+use identity_iota::{account::{Account, IdentitySetup, MethodContent}, iota_core::{IotaDID, Network}, prelude::{KeyPair, KeyType, IotaDocument}, core::{ToJson, FromJson}, client::{Resolver, CredentialValidator, FailFast, CredentialValidationOptions, ClientBuilder, ResolverBuilder}, did::MethodRelationship, crypto::{Ed25519, PublicKey}, credential::Credential};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
@@ -10,6 +10,17 @@ lazy_static! {
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
 }
 
+mod settings {
+    use identity_iota::iota_core::Network;
+
+    pub const private_node_url : &str = "https://api.lb-0.h.chrysalis-devnet.iota.cafe";
+
+    pub const network_name : &str= "tangle";
+
+    pub fn getNetwork() -> Network {
+        Network::try_from_name(network_name).unwrap().clone()
+    }
+}
 #[no_mangle]
 pub extern fn create_did(priv_key: *const u8, key_len: usize) -> *mut c_char {
     let account =  RUNTIME.block_on(
@@ -37,8 +48,19 @@ async fn create_did_async(priv_key: *const u8, key_len: usize) -> Result<Account
         let pk: Box<[u8]> = kp.private().as_ref().into();
         identity_setup = identity_setup.private_key(pk.into());
     }
+
     println!("Creating did:iota...");
-    let mut account = Account::builder().autopublish(false).create_identity(identity_setup).await?;
+    let mut account = Account::builder()
+        .autopublish(false)
+        .client_builder(
+            // Configure a client for the private network
+            ClientBuilder::new().network(settings::getNetwork()).primary_node(
+                settings::private_node_url,
+                None,
+                None,
+            )?,
+        )
+        .create_identity(identity_setup).await?;
     account.publish().await?;
 
     println!("Created did: {}", account.did().to_string());
@@ -84,7 +106,15 @@ pub extern fn resolve_did(did: *const c_char) -> *mut c_char {
 }
 
 async fn resolve_did_async(did_str: String) -> Result<IotaDocument, identity_iota::account::Error> {
-    let resolver: Resolver = Resolver::new().await?;
+    // resolve did_document from tangle with did like did:iota:dajkdakjf..
+    println!("Resolving did: {} from tangle {}", did_str, settings::private_node_url);
+
+    let resolver_builder: ResolverBuilder = ResolverBuilder::new();
+    let client = ClientBuilder::new()
+        .network(settings::getNetwork())
+        .primary_node(settings::private_node_url,None,None)?.build().await?;
+    let resolver: Resolver = resolver_builder.client(client.into()).build().await?;
+
     let did: IotaDID = IotaDID::parse(did_str)?;
     let doc = resolver.resolve(&did).await?;
     Ok(doc.document)
