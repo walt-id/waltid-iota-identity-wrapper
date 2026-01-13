@@ -1,3 +1,12 @@
+## 🚨 Repository Moved
+
+> [!IMPORTANT]
+> This repository is no longer maintained.
+> 
+> All walt.id development continues in the monorepo:
+> 
+### 👉 Code **https://github.com/walt-id/waltid-identity** & Docs **https://docs.walt.id**
+
 # walt.id IOTA identity wrapper
 
 This is a simple RUST library, wrapping the [IOTA identity framework](https://wiki.iota.org/identity.rs/introduction), exposing a plain C interface, that can be loaded via dynamic library loading in most languages such as Java, etc.
